@@ -1,0 +1,275 @@
+================================================================================
+HADOOP MAPREDUCE - WINDOWS COMMANDS, HELP, TROUBLESHOOTING & VIVA
+Experiment 7: Employee Payroll Aggregation | Hadoop 2.8.0 / Windows CMD
+================================================================================
+
+INDEX
+  01. Windows environment verification
+  02. Starting Hadoop services (only if needed)
+  03. Workspace and file commands
+  04. HDFS input/output commands
+  05. Java compilation and JAR commands
+  06. Execute and verify MapReduce
+  07. Quick one-page exam workflow
+  08. Expected result and workflow explanation
+  09. Common Windows / Hadoop runtime errors
+  10. Short viva answers
+  11. Safe cleanup rules
+
+GENERAL RULE: Commands below are for WINDOWS COMMAND PROMPT (cmd.exe).
+              Do not paste Java source into CMD. Use Notepad to save .java files.
+              %A in FOR loops is for interactive CMD, %%A is for a .bat file.
+
+--------------------------------------------------------------------------------
+01. WINDOWS ENVIRONMENT VERIFICATION
+--------------------------------------------------------------------------------
+  hadoop version                        Hadoop version (expected 2.8.0 in lab)
+  java -version                          Installed Java runtime
+  javac -version                         Installed Java compiler
+  jar --help                             Check JAR packaging tool is available
+  jps                                    Display running JVM processes
+  where hadoop                           Find Hadoop executable
+  where java                             Find Java executable
+  where javac                            Find compiler executable
+  hadoop classpath                       Print Hadoop compiler classpath
+  hdfs dfs -ls /                          List HDFS root (tests connectivity)
+
+NOTE: 'jar --help' may behave differently across JDKs; 'jar -tf' on a
+      real JAR (see Section 05) is the reliable packaging verification.
+
+--------------------------------------------------------------------------------
+02. START HADOOP ONLY IF IT IS CONFIGURED BUT NOT RUNNING
+--------------------------------------------------------------------------------
+  start-dfs.cmd                          Starts HDFS daemons if supplied by setup
+  start-yarn.cmd                         Starts YARN daemons if supplied by setup
+  jps                                    Confirm NameNode, DataNode etc.
+  hdfs dfsadmin -report                  Check live DataNodes and capacity
+
+If start-dfs.cmd / start-yarn.cmd are not found, use your lab's configured
+startup mechanism. Do NOT run 'hdfs namenode -format' to start Hadoop.
+
+--------------------------------------------------------------------------------
+03. WORKSPACE AND LOCAL WINDOWS FILE COMMANDS
+--------------------------------------------------------------------------------
+  set "LAB=/user/%USERNAME%/payroll"        Set personal HDFS workspace variable
+  mkdir "%USERPROFILE%\payroll_lab" 2>nul Create local workspace
+  cd /d "%USERPROFILE%\payroll_lab"       Enter local workspace
+  cd                                      Show current directory
+  dir                                     List local files
+  dir *.java                              Verify Java source files
+  type employees.csv                      Read local CSV
+  notepad employees.csv                   Edit local CSV
+  notepad PayrollMapper.java              Write Mapper source
+  notepad PayrollReducer.java             Write Reducer source
+  notepad Payroll.java                    Write Driver source
+
+Create the CSV directly in CMD (no header; copy all SIX lines):
+  > employees.csv echo 1,John Doe,Engineering,5000
+  >> employees.csv echo 2,Jane Smith,HR,4000
+  >> employees.csv echo 3,Tom Brown,Engineering,5500
+  >> employees.csv echo 4,Alice White,HR,4200
+  >> employees.csv echo 5,David Black,Sales,6000
+  >> employees.csv echo 6,Emily Green,Sales,6500
+  type employees.csv
+
+--------------------------------------------------------------------------------
+04. HDFS INPUT AND OUTPUT COMMANDS
+--------------------------------------------------------------------------------
+  hdfs dfs -mkdir -p %LAB%/input              Create HDFS input directory
+  hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+                                            Upload/overwrite input file
+  hdfs dfs -ls %LAB%/input                    List input directory
+  hdfs dfs -cat %LAB%/input/employees.csv     Show uploaded CSV
+  hdfs dfs -rm -r -f %LAB%/output             Remove OLD job output directory
+  hdfs dfs -ls %LAB%/output                   List produced output files
+  hdfs dfs -cat %LAB%/output/part-r-00000     Read reducer results
+  hdfs dfs -test -e %LAB%/output/_SUCCESS    Check success marker (via exit code)
+  if not errorlevel 1 echo JOB SUCCESS MARKER EXISTS
+  hdfs dfs -get %LAB%/output/part-r-00000 results.txt
+  type results.txt                             Read downloaded output locally
+
+HDFS and local PC are separate filesystems: 'type' reads LOCAL files;
+'hdfs dfs -cat' reads HDFS files.
+
+--------------------------------------------------------------------------------
+05. COMPILE AND CREATE payroll.jar
+--------------------------------------------------------------------------------
+  mkdir classes 2>nul
+
+For JDK 9 or later (recommended for a modern Java installation targeting
+Hadoop 2.8.0 bytecode compatibility):
+  for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+Alternative ONLY for JDK 8 (JDK 8 does not support --release):
+  for /f "delims=" %A in ('hadoop classpath') do javac -source 8 -target 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+  dir classes                         Check all 3 compiled .class files
+  jar -cvf payroll.jar -C classes .   Package compiled classes into a JAR
+  jar -tf payroll.jar                 List contents of JAR
+
+COMPILATION SUCCESS: javac usually prints nothing on success.
+Do not run BOTH javac commands; choose ONE based on your JDK.
+
+--------------------------------------------------------------------------------
+06. EXECUTE AND VERIFY
+--------------------------------------------------------------------------------
+  hdfs dfs -rm -r -f %LAB%/output
+  hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+  hdfs dfs -ls %LAB%/output
+  hdfs dfs -cat %LAB%/output/part-r-00000
+
+The output directory MUST NOT exist when a MapReduce job starts.
+In the command, 'Payroll' is the Java DRIVER CLASS, not the JAR filename.
+
+--------------------------------------------------------------------------------
+07. QUICK ONE-PAGE EXAM COMMAND FLOW
+--------------------------------------------------------------------------------
+Run these ONLY after saving employees.csv, PayrollMapper.java,
+PayrollReducer.java, and Payroll.java from Scenario(3).txt.
+
+  set "LAB=/user/%USERNAME%/payroll"
+  cd /d "%USERPROFILE%\payroll_lab"
+  dir *.java
+  type employees.csv
+  hdfs dfs -mkdir -p %LAB%/input
+  hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+  hdfs dfs -cat %LAB%/input/employees.csv
+  mkdir classes 2>nul
+  for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+  jar -cvf payroll.jar -C classes .
+  jar -tf payroll.jar
+  hdfs dfs -rm -r -f %LAB%/output
+  hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+  hdfs dfs -cat %LAB%/output/part-r-00000
+
+For JDK 8, replace --release 8 with -source 8 -target 8 (Section 05).
+
+--------------------------------------------------------------------------------
+08. EXPECTED RESULT / INTERNAL FLOW
+--------------------------------------------------------------------------------
+Expected HDFS result (TAB-separated):
+  Engineering    10500
+  HR              8200
+  Sales          12500
+
+INPUT employees.csv -> HDFS -> MAPPER -> SHUFFLE/SORT -> REDUCER -> HDFS
+Engineering (5000,5500) -> Engineering 10500
+HR          (4000,4200) -> HR           8200
+Sales       (6000,6500) -> Sales       12500
+
+MAP:      (Employee CSV record) -> (Department, Salary)
+SHUFFLE:  Groups all salaries by Department key
+REDUCE:   (Department, list of salaries) -> (Department, total sum)
+
+--------------------------------------------------------------------------------
+09. EXAM EMERGENCY BUG FIXES
+--------------------------------------------------------------------------------
+ERROR 1: 'javac' is not recognized
+  Cause: JDK bin directory not on PATH; JRE alone is insufficient.
+  Fix:   Verify 'where javac', 'javac -version'; configure your JDK.
+
+ERROR 2: 'hadoop' / 'hdfs' is not recognized
+  Cause: Hadoop bin directory not on PATH.
+  Fix:   Check Hadoop installation and HADOOP_HOME / PATH.
+
+ERROR 3: 'release version 8 not supported' or 'invalid flag: --release'
+  Cause: JDK 8 or other unsuitable compiler.
+  Fix:   On JDK 8 use '-source 8 -target 8' instead.
+
+ERROR 4: 'Unsupported major.minor version' / 'UnsupportedClassVersionError'
+  Cause: Java bytecode produced for a newer JVM than Hadoop launches.
+  Fix:   Use --release 8 (JDK 9+) or -source 8 -target 8 (JDK 8).
+
+ERROR 5: 'package org.apache.hadoop... does not exist'
+  Cause: javac was run without the Hadoop classpath.
+  Fix:   Use the full 'for /f ... hadoop classpath ... javac' command.
+
+ERROR 6: 'Could not find or load main class Payroll'
+  Cause: JAR missing Payroll.class or wrong MainClass spelling.
+  Fix:   Run 'jar -tf payroll.jar'; rebuild JAR; use class Payroll.
+
+ERROR 7: 'FileAlreadyExistsException: Output directory ... already exists'
+  Cause: MapReduce refuses to overwrite its output directory.
+  Fix:   hdfs dfs -rm -r -f %LAB%/output
+
+ERROR 8: 'Input path does not exist'
+  Cause: File was created locally but never uploaded to HDFS.
+  Fix:   hdfs dfs -mkdir -p %LAB%/input
+         hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+         hdfs dfs -cat %LAB%/input/employees.csv
+
+ERROR 9: 'Connection refused' / NameNode unreachable
+  Cause: HDFS service is down, or Hadoop configuration points elsewhere.
+  Fix:   'jps', 'hdfs dfsadmin -report'; use configured lab startup.
+
+ERROR 10: 'NumberFormatException' in PayrollMapper
+  Cause: Salary column is not a valid integer (header, spaces, malformed CSV).
+  Fix:   Use SIX headerless records. Mapper trims the salary field.
+
+ERROR 11: 'No such file or directory: PayrollMapper.java'
+  Cause: Wrong working directory or Notepad saved .java.txt.
+  Fix:   'cd', 'dir *.java', and save Notepad as 'All Files (*.*)'.
+
+ERROR 12: 'Access denied' / permission denied on HDFS path
+  Cause: User permissions do not allow creating /user/<username>.
+  Fix:   Ask lab admin for your home path; do not delete shared folders.
+
+ERROR 13: 'part-r-00000' is missing
+  Cause: Job failed or no reducer output produced.
+  Fix:   Check job success, output directory, and YARN logs.
+
+ERROR 14: Using %%A instead of %A in Windows CMD
+  Cause: %%A is for a saved .bat or .cmd script, not interactive CMD.
+  Fix:   CMD uses %A; batch file uses %%A.
+
+--------------------------------------------------------------------------------
+10. FAST VIVA ANSWERS
+--------------------------------------------------------------------------------
+Q01. What is Hadoop?
+      Framework for distributed storage and processing of large datasets.
+Q02. What is HDFS?
+      Hadoop Distributed File System, storing files across DataNodes.
+Q03. NameNode role?
+      Maintains HDFS metadata and block locations.
+Q04. DataNode role?
+      Stores and serves actual HDFS blocks.
+Q05. What is MapReduce?
+      Parallel programming model with Map and Reduce stages.
+Q06. Mapper output for 1,John Doe,Engineering,5000?
+      (Engineering,5000).
+Q07. What happens during shuffle and sort?
+      Mapper values are grouped by their department keys.
+Q08. Reducer input for Engineering?
+      (Engineering,[5000,5500]).
+Q09. Reducer output for Engineering?
+      (Engineering,10500).
+Q10. Why use IntWritable and Text?
+      Hadoop's serializable writable integer and text types.
+Q11. Why upload CSV to HDFS?
+      Hadoop job reads distributed input from HDFS paths.
+Q12. Why create payroll.jar?
+      To package compiled Java classes for Hadoop job submission.
+Q13. Why delete old output?
+      Hadoop rejects an output path that already exists.
+Q14. Purpose of _SUCCESS?
+      Marker created when a FileOutputFormat job completes successfully.
+Q15. What is part-r-00000?
+      Reducer output partition file; 00000 means first part.
+Q16. What does the Driver do?
+      Sets job classes, output types, input, output, and job submission.
+Q17. Who does the summation?
+      Reducer; mapper only emits department-salary pairs.
+Q18. What happens if you add IT,7000?
+      An IT 7000 output row appears after rerunning on updated input.
+
+--------------------------------------------------------------------------------
+11. SAFE CLEANUP - ONLY YOUR EXPERIMENT'S OUTPUT
+--------------------------------------------------------------------------------
+  hdfs dfs -rm -r -f %LAB%/output
+
+DO NOT run 'hdfs namenode -format'.
+DO NOT delete Hadoop installation folders, D:\hadoop\data, or shared HDFS data.
+Keep HDFS operations limited to %LAB%.
+
+SOURCE ALIGNMENT: Slide 8 input/expected result; Slides 9-13 Windows
+commands and Java logic; Slides 14-15 aggregation and safety rules.

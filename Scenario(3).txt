@@ -1,0 +1,381 @@
+================================================================================
+HADOOP MAPREDUCE - SOLVED WINDOWS EXAM SCENARIO WITH COMPLETE JAVA CODE
+Experiment 7: Employee Payroll System using Hadoop MapReduce with HDFS
+================================================================================
+
+INDEX
+  01. Aim, scenario, and prerequisites
+  02. Check Hadoop/Java in Windows CMD
+  03. Create local project folder
+  04. Create sample CSV from CMD (direct copy-paste)
+  05. Create PayrollMapper.java - full program
+  06. Create PayrollReducer.java - full program
+  07. Create Payroll.java - full Driver program
+  08. Create HDFS input and upload CSV
+  09. Compile with Hadoop libraries
+  10. Package Java classes into a JAR
+  11. Run Hadoop MapReduce job
+  12. Verify expected result
+  13. Scenario B - add an IT employee and rerun
+  14. Scenario C - modify a salary and rerun
+  15. Final all-commands revision block
+  16. Map, shuffle, reduce dry run
+  17. Cleanup and lab safety
+
+IMPORTANT - TWO TYPES OF CONTENT BELOW:
+  [CMD]        Type/copy into WINDOWS COMMAND PROMPT (cmd.exe).
+  [FILE CODE]  Paste into NOTEPAD for the exact filename; NOT into CMD.
+
+--------------------------------------------------------------------------------
+01. AIM AND GIVEN PROBLEM
+--------------------------------------------------------------------------------
+AIM: Using MapReduce in Hadoop, calculate the total salaries paid by
+     each department from EmployeeID, Name, Department, Salary records.
+
+INPUT:  employees.csv (6 lines)
+OUTPUT: Engineering 10500, HR 8200, Sales 12500
+
+PREREQUISITES:
+  Hadoop 2.8.0 installed/configured; running HDFS; MapReduce/YARN configured;
+  working JDK with javac and jar; Windows CMD; writable HDFS user directory.
+
+--------------------------------------------------------------------------------
+02. CHECK TOOLS [CMD]
+--------------------------------------------------------------------------------
+hadoop version
+java -version
+javac -version
+jps
+hdfs dfs -ls /
+
+If your configured Hadoop is not already running, the lab may use:
+  start-dfs.cmd
+  start-yarn.cmd
+  jps
+Run these startup commands only if they exist in your installation.
+NEVER run 'hdfs namenode -format' as a restart command.
+
+--------------------------------------------------------------------------------
+03. CREATE PROJECT FOLDER [CMD]
+--------------------------------------------------------------------------------
+set "LAB=/user/%USERNAME%/payroll"
+mkdir "%USERPROFILE%\payroll_lab" 2>nul
+cd /d "%USERPROFILE%\payroll_lab"
+cd
+
+Expected local directory resembles:
+  C:\Users\YourUserName\payroll_lab
+
+--------------------------------------------------------------------------------
+04. CREATE THE EXACT INPUT employees.csv [CMD - COPY ALL]
+--------------------------------------------------------------------------------
+> employees.csv echo 1,John Doe,Engineering,5000
+>> employees.csv echo 2,Jane Smith,HR,4000
+>> employees.csv echo 3,Tom Brown,Engineering,5500
+>> employees.csv echo 4,Alice White,HR,4200
+>> employees.csv echo 5,David Black,Sales,6000
+>> employees.csv echo 6,Emily Green,Sales,6500
+type employees.csv
+
+These six CMD statements create a headerless CSV automatically.
+First line uses > to replace file; remaining lines use >> to append.
+
+Expected file contents:
+1,John Doe,Engineering,5000
+2,Jane Smith,HR,4000
+3,Tom Brown,Engineering,5500
+4,Alice White,HR,4200
+5,David Black,Sales,6000
+6,Emily Green,Sales,6500
+
+--------------------------------------------------------------------------------
+05. CREATE PayrollMapper.java
+--------------------------------------------------------------------------------
+[CMD - OPEN FILE]
+notepad PayrollMapper.java
+
+[FILE CODE - PASTE EXACTLY INTO NOTEPAD; SAVE AS PayrollMapper.java]
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+public class PayrollMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+
+    @Override
+    public void map(LongWritable key, Text value, Context context)
+            throws IOException, InterruptedException {
+
+        String[] employeeData = value.toString().split(",");
+        if (employeeData.length != 4) {
+            return;
+        }
+
+        String department = employeeData[2].trim();
+        int salary = Integer.parseInt(employeeData[3].trim());
+
+        context.write(new Text(department), new IntWritable(salary));
+    }
+}
+
+[END FILE CODE]
+
+What Mapper does: reads each CSV line; key=Department, value=Salary.
+Example: (1,John Doe,Engineering,5000) => (Engineering,5000).
+
+--------------------------------------------------------------------------------
+06. CREATE PayrollReducer.java
+--------------------------------------------------------------------------------
+[CMD - OPEN FILE]
+notepad PayrollReducer.java
+
+[FILE CODE - PASTE EXACTLY INTO NOTEPAD; SAVE AS PayrollReducer.java]
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class PayrollReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+
+    @Override
+    public void reduce(Text key, Iterable<IntWritable> values, Context context)
+            throws IOException, InterruptedException {
+
+        int totalSalary = 0;
+        for (IntWritable value : values) {
+            totalSalary += value.get();
+        }
+        context.write(key, new IntWritable(totalSalary));
+    }
+}
+
+[END FILE CODE]
+
+Reducer receives (department, salary values) and sums the salaries.
+Example: Engineering [5000,5500] => Engineering 10500.
+
+--------------------------------------------------------------------------------
+07. CREATE Payroll.java - DRIVER
+--------------------------------------------------------------------------------
+[CMD - OPEN FILE]
+notepad Payroll.java
+
+[FILE CODE - PASTE EXACTLY INTO NOTEPAD; SAVE AS Payroll.java]
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+public class Payroll {
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 2) {
+            System.err.println("Usage: Payroll <input_hdfs_path> <output_hdfs_path>");
+            System.exit(1);
+        }
+
+        Job job = Job.getInstance(new Configuration(), "Employee Payroll");
+        job.setJarByClass(Payroll.class);
+        job.setMapperClass(PayrollMapper.class);
+        job.setReducerClass(PayrollReducer.class);
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(IntWritable.class);
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(IntWritable.class);
+        job.setNumReduceTasks(1);
+
+        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        System.exit(job.waitForCompletion(true) ? 0 : 1);
+    }
+}
+
+[END FILE CODE]
+
+Driver tells Hadoop which Mapper, Reducer, key/value types, HDFS paths,
+and number of reducers to use. Exactly ONE reducer yields part-r-00000.
+
+VERIFY ALL FILES [CMD]:
+dir *.java
+dir employees.csv
+
+Expected 4 LOCAL files:
+  employees.csv
+  PayrollMapper.java
+  PayrollReducer.java
+  Payroll.java
+
+--------------------------------------------------------------------------------
+08. CREATE HDFS INPUT DIRECTORY AND UPLOAD CSV [CMD]
+--------------------------------------------------------------------------------
+hdfs dfs -mkdir -p %LAB%/input
+hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+hdfs dfs -ls %LAB%/input
+hdfs dfs -cat %LAB%/input/employees.csv
+
+IMPORTANT: Local employees.csv and HDFS employees.csv are different copies.
+Always upload again after editing the local file.
+
+--------------------------------------------------------------------------------
+09. COMPILE JAVA FILES [CMD]
+--------------------------------------------------------------------------------
+mkdir classes 2>nul
+
+[JDK 9 or later - COPY THIS SINGLE LINE INTO CMD]
+for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+[JDK 8 ONLY - ALTERNATIVE; DO NOT RUN BOTH]
+for /f "delims=" %A in ('hadoop classpath') do javac -source 8 -target 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+[CMD - VERIFY]
+dir classes
+
+Expected classes:
+  Payroll.class
+  PayrollMapper.class
+  PayrollReducer.class
+
+NOTE: Successful 'javac' compilation normally prints no messages.
+NOTE: For a .bat file, replace %A by %%A; this guide is for CMD.
+
+--------------------------------------------------------------------------------
+10. PACKAGE THE COMPILED CLASSES [CMD]
+--------------------------------------------------------------------------------
+jar -cvf payroll.jar -C classes .
+jar -tf payroll.jar
+
+Expected JAR contains Payroll.class, PayrollMapper.class,
+and PayrollReducer.class (and possibly META-INF entries).
+
+--------------------------------------------------------------------------------
+11. RUN MAPREDUCE JOB [CMD]
+--------------------------------------------------------------------------------
+hdfs dfs -rm -r -f %LAB%/output
+hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+
+Important: Hadoop creates output itself; do not 'mkdir' the output
+folder before a job. The remove command deletes only your old result.
+
+--------------------------------------------------------------------------------
+12. VERIFY RESULT [CMD]
+--------------------------------------------------------------------------------
+hdfs dfs -ls %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+[EXPECTED OUTPUT - TAB SEPARATED]
+Engineering    10500
+HR             8200
+Sales          12500
+
+[OPTIONAL DOWNLOAD TO LOCAL WINDOWS DIRECTORY]
+hdfs dfs -get %LAB%/output/part-r-00000 results.txt
+type results.txt
+
+The HDFS output directory may contain:
+  _SUCCESS
+  part-r-00000
+
+--------------------------------------------------------------------------------
+13. SCENARIO B - NEW EMPLOYEE IN A NEW DEPARTMENT
+--------------------------------------------------------------------------------
+Question: A new IT employee with salary 7000 joins. Compute fresh totals.
+
+[CMD - COPY-PASTE]
+>> employees.csv echo 7,Meera,IT,7000
+hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+hdfs dfs -rm -r -f %LAB%/output
+hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+[EXPECTED OUTPUT]
+Engineering    10500
+HR             8200
+IT             7000
+Sales          12500
+
+The same compiled MapReduce program works with an additional department.
+
+--------------------------------------------------------------------------------
+14. SCENARIO C - CHANGE ONE SALARY AND RERUN
+--------------------------------------------------------------------------------
+Question: Make an independent 6-row input with John Doe salary 6000
+          instead of 5000. What happens to Engineering total?
+
+[CMD - RESTORE 6-ROW CSV WITH MODIFIED SALARY]
+> employees.csv echo 1,John Doe,Engineering,6000
+>> employees.csv echo 2,Jane Smith,HR,4000
+>> employees.csv echo 3,Tom Brown,Engineering,5500
+>> employees.csv echo 4,Alice White,HR,4200
+>> employees.csv echo 5,David Black,Sales,6000
+>> employees.csv echo 6,Emily Green,Sales,6500
+hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+hdfs dfs -rm -r -f %LAB%/output
+hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+[EXPECTED OUTPUT]
+Engineering    11500
+HR             8200
+Sales          12500
+
+To restore original results, repeat Section 04, then upload and rerun.
+
+--------------------------------------------------------------------------------
+15. EXAM REVISION - COMPLETE COMMAND ORDER
+--------------------------------------------------------------------------------
+Run these AFTER saving the three .java files and creating the six-row CSV.
+Use the first javac line for JDK 9+ or its JDK 8 alternative.
+
+set "LAB=/user/%USERNAME%/payroll"
+cd /d "%USERPROFILE%\payroll_lab"
+hdfs dfs -mkdir -p %LAB%/input
+hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+hdfs dfs -cat %LAB%/input/employees.csv
+mkdir classes 2>nul
+for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+jar -cvf payroll.jar -C classes .
+jar -tf payroll.jar
+hdfs dfs -rm -r -f %LAB%/output
+hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+hdfs dfs -ls %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+--------------------------------------------------------------------------------
+16. MAP / SHUFFLE / REDUCE DRY RUN
+--------------------------------------------------------------------------------
+INPUT CSV:                         MAPPER EMITS:
+John Doe,Engineering,5000         (Engineering,5000)
+Jane Smith,HR,4000                (HR,4000)
+Tom Brown,Engineering,5500        (Engineering,5500)
+Alice White,HR,4200               (HR,4200)
+David Black,Sales,6000            (Sales,6000)
+Emily Green,Sales,6500            (Sales,6500)
+
+SHUFFLE AND SORT GROUPS:
+Engineering -> [5000,5500]
+HR          -> [4000,4200]
+Sales       -> [6000,6500]
+
+REDUCER CALCULATES:
+Engineering = 5000 + 5500 = 10500
+HR          = 4000 + 4200 = 8200
+Sales       = 6000 + 6500 = 12500
+
+FINAL FILE: %LAB%/output/part-r-00000
+
+--------------------------------------------------------------------------------
+17. CLEAN UP - DO NOT TOUCH SHARED HADOOP DATA
+--------------------------------------------------------------------------------
+hdfs dfs -rm -r -f %LAB%/output
+
+Do not format NameNode and do not remove HDFS directories outside %LAB%.
+
+SOURCE: Original six records, totals, mapping and commands are from
+'Hadoop_MapReduce_Lab_Experiment_PPT 2.pptx', Slides 8-15.
+The complete Java files, validation and extra exam scenarios are
+runnable teaching expansions of those slide snippets.

@@ -1,0 +1,338 @@
+================================================================================
+HADOOP MAPREDUCE - WINDOWS CMD & JAVA MASTER SYNTAX CHEATSHEET
+Experiment 7: Employee Payroll MapReduce with HDFS
+================================================================================
+
+INDEX
+  01. Which shell runs which language?
+  02. Windows CMD general syntax
+  03. HDFS directory/file command syntax
+  04. Mapper Java structure (complete template)
+  05. Reducer Java structure (complete template)
+  06. Driver Java structure (complete template)
+  07. CSV parsing and output types
+  08. Compilation syntax on Windows
+  09. JAR creation and job execution syntax
+  10. Output inspection, overwrite and rerun
+  11. Placeholders and real examples
+  12. One-minute exam reference
+
+This is a WINDOWS CMD cheat sheet, NOT Linux bash.
+In syntax patterns, placeholders in angle brackets are explanatory only.
+Copy the concrete example line, not the placeholder.
+
+--------------------------------------------------------------------------------
+01. FILE VS SHELL - WHERE EACH CODE BLOCK GOES
+--------------------------------------------------------------------------------
+  CMD LINE            -> Windows Command Prompt (cmd.exe)
+  .csv DATA           -> employees.csv in local workspace
+  .java SOURCE        -> Notepad Java file; save as '*.java'
+  .class OUTPUT       -> Produced by javac; do not type manually
+  payroll.jar         -> Produced by jar; do not type manually
+  HDFS FILE           -> Hadoop-managed filesystem; use hdfs dfs
+
+  notepad employees.csv
+  notepad PayrollMapper.java
+  notepad PayrollReducer.java
+  notepad Payroll.java
+
+--------------------------------------------------------------------------------
+02. WINDOWS CMD - BASIC SYNTAX
+--------------------------------------------------------------------------------
+COMMAND FORM                                 REAL COPY-PASTE EXAMPLE
+  set "VAR=value"                           set "LAB=/user/%USERNAME%/payroll"
+  mkdir "local-directory"                   mkdir "%USERPROFILE%\payroll_lab" 2>nul
+  cd /d "directory"                        cd /d "%USERPROFILE%\payroll_lab"
+  dir wildcard                            dir *.java
+  type filename                           type employees.csv
+  > filename echo text                    > employees.csv echo 1,John Doe,Engineering,5000
+  >> filename echo text                   >> employees.csv echo 2,Jane Smith,HR,4000
+
+Symbols:
+  >       Write/overwrite a local file via output redirection.
+  >>      Append text to a local file.
+  %VAR%   Expand Windows environment variable (example: %USERNAME%).
+  2>nul   Suppress the stderr 'already exists' message for mkdir.
+  /d      Allow 'cd' to switch drive letters, if needed.
+  %A      FOR variable in an INTERACTIVE CMD command.
+  %%A     FOR variable in a BATCH (.bat/.cmd) file.
+
+--------------------------------------------------------------------------------
+03. HDFS SYNTAX / COMMAND EXAMPLES
+--------------------------------------------------------------------------------
+Create directory:
+  SYNTAX:  hdfs dfs -mkdir -p <hdfs-directory>
+  EXAMPLE: hdfs dfs -mkdir -p %LAB%/input
+
+List directory:
+  SYNTAX:  hdfs dfs -ls <hdfs-directory>
+  EXAMPLE: hdfs dfs -ls %LAB%/input
+
+Upload and overwrite local file in HDFS:
+  SYNTAX:  hdfs dfs -put -f <local-file> <hdfs-destination>
+  EXAMPLE: hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+
+Print HDFS file contents:
+  SYNTAX:  hdfs dfs -cat <hdfs-file>
+  EXAMPLE: hdfs dfs -cat %LAB%/input/employees.csv
+
+Download HDFS file into local folder:
+  SYNTAX:  hdfs dfs -get <hdfs-file> <local-destination>
+  EXAMPLE: hdfs dfs -get %LAB%/output/part-r-00000 results.txt
+
+Delete old output directory in your own area:
+  SYNTAX:  hdfs dfs -rm -r -f <hdfs-output-directory>
+  EXAMPLE: hdfs dfs -rm -r -f %LAB%/output
+
+Report DataNode health:
+  hdfs dfsadmin -report
+
+NOTE: '-put -f' can overwrite HDFS input FILE; MapReduce output
+      DIRECTORY must not already exist when starting a job.
+
+--------------------------------------------------------------------------------
+04. JAVA MAPPER TEMPLATE - FILE PayrollMapper.java
+--------------------------------------------------------------------------------
+Mapper signature:
+  Mapper<INPUT_KEY, INPUT_VALUE, OUTPUT_KEY, OUTPUT_VALUE>
+For text input:
+  Mapper<LongWritable, Text, Text, IntWritable>
+
+[FILE CODE - FULL COPY-PASTE JAVA MAPPER]
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+public class PayrollMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+
+    @Override
+    public void map(LongWritable key, Text value, Context context)
+            throws IOException, InterruptedException {
+
+        String[] employeeData = value.toString().split(",");
+        if (employeeData.length != 4) {
+            return;
+        }
+
+        String department = employeeData[2].trim();
+        int salary = Integer.parseInt(employeeData[3].trim());
+
+        context.write(new Text(department), new IntWritable(salary));
+    }
+}
+
+[END FILE CODE]
+
+Meaning:
+  LongWritable  -> input file byte offset for the record.
+  Text (input) -> one CSV record as text.
+  Text (output)-> department as grouping key.
+  IntWritable  -> salary integer passed to Reducer.
+  context.write(key,value) emits the pair for grouping.
+
+--------------------------------------------------------------------------------
+05. JAVA REDUCER TEMPLATE - FILE PayrollReducer.java
+--------------------------------------------------------------------------------
+Reducer signature:
+  Reducer<MAP_KEY, MAP_VALUE, FINAL_KEY, FINAL_VALUE>
+In this lab:
+  Reducer<Text, IntWritable, Text, IntWritable>
+
+[FILE CODE - FULL COPY-PASTE JAVA REDUCER]
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class PayrollReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+
+    @Override
+    public void reduce(Text key, Iterable<IntWritable> values, Context context)
+            throws IOException, InterruptedException {
+
+        int totalSalary = 0;
+        for (IntWritable value : values) {
+            totalSalary += value.get();
+        }
+        context.write(key, new IntWritable(totalSalary));
+    }
+}
+
+[END FILE CODE]
+
+Meaning:
+  'key' is a department; 'values' are all salaries for that dept.
+  value.get() extracts primitive int from Hadoop IntWritable.
+  context.write() emits ONE final row per department.
+
+--------------------------------------------------------------------------------
+06. JAVA DRIVER TEMPLATE - FILE Payroll.java
+--------------------------------------------------------------------------------
+[FILE CODE - FULL COPY-PASTE JAVA DRIVER]
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+public class Payroll {
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 2) {
+            System.err.println("Usage: Payroll <input_hdfs_path> <output_hdfs_path>");
+            System.exit(1);
+        }
+
+        Job job = Job.getInstance(new Configuration(), "Employee Payroll");
+        job.setJarByClass(Payroll.class);
+        job.setMapperClass(PayrollMapper.class);
+        job.setReducerClass(PayrollReducer.class);
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(IntWritable.class);
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(IntWritable.class);
+        job.setNumReduceTasks(1);
+
+        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        System.exit(job.waitForCompletion(true) ? 0 : 1);
+    }
+}
+
+[END FILE CODE]
+
+Essential calls to memorize:
+  Job.getInstance(new Configuration(),"Employee Payroll")
+  job.setJarByClass(Payroll.class)
+  job.setMapperClass(PayrollMapper.class)
+  job.setReducerClass(PayrollReducer.class)
+  job.setOutputKeyClass(Text.class)
+  job.setOutputValueClass(IntWritable.class)
+  FileInputFormat.addInputPath(job,new Path(args[0]))
+  FileOutputFormat.setOutputPath(job,new Path(args[1]))
+  job.waitForCompletion(true)
+
+--------------------------------------------------------------------------------
+07. CSV AND HADOOP DATA TYPES
+--------------------------------------------------------------------------------
+CSV fields by position (zero-indexed):
+  employeeData[0] -> EmployeeID
+  employeeData[1] -> Employee Name
+  employeeData[2] -> Department
+  employeeData[3] -> Salary
+
+  String[] employeeData = value.toString().split(",");
+  String department = employeeData[2].trim();
+  int salary = Integer.parseInt(employeeData[3].trim());
+  context.write(new Text(department), new IntWritable(salary));
+
+WARNINGS:
+  No CSV header is used in the original experiment.
+  A raw split(",") is suitable for these simple records, not general
+  quoted CSV containing embedded commas.
+  Integer.parseInt accepts whole-number salaries only.
+
+--------------------------------------------------------------------------------
+08. COMPILATION SYNTAX IN WINDOWS CMD
+--------------------------------------------------------------------------------
+Create compiled class output folder:
+  mkdir classes 2>nul
+
+Generic javac syntax:
+  javac -classpath <classpath> -d <class-folder> <source1.java> ...
+
+Copy-paste for JDK 9+ (target Java 8 class compatibility):
+  for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+Copy-paste for JDK 8 (alternative):
+  for /f "delims=" %A in ('hadoop classpath') do javac -source 8 -target 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+
+If you put this in run_payroll.bat instead of interactive CMD, change:
+  %A -> %%A
+
+--------------------------------------------------------------------------------
+09. JAR / RUN SYNTAX
+--------------------------------------------------------------------------------
+JAR generic syntax:
+  jar -cvf <jar-name> -C <compiled-class-folder> .
+
+JAR copy-paste:
+  jar -cvf payroll.jar -C classes .
+
+Verify JAR:
+  jar -tf payroll.jar
+
+Run generic job:
+  hadoop jar <jar-file> <driver-class> <hdfs-input-dir> <hdfs-output-dir>
+
+Run copy-paste:
+  hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+
+--------------------------------------------------------------------------------
+10. VERIFY / RERUN / DELETE OUTPUT
+--------------------------------------------------------------------------------
+hdfs dfs -ls %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+After editing the CSV, ALWAYS update HDFS input:
+  hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+
+Before rerunning, delete ONLY your prior output path:
+  hdfs dfs -rm -r -f %LAB%/output
+
+Rerun:
+  hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+  hdfs dfs -cat %LAB%/output/part-r-00000
+
+To write result to local Windows file:
+  hdfs dfs -get %LAB%/output/part-r-00000 results.txt
+  type results.txt
+
+--------------------------------------------------------------------------------
+11. PLACEHOLDERS VS REAL EXAMPLES
+--------------------------------------------------------------------------------
+  <jar-file>      means a filename such as payroll.jar.
+  <driver-class>  means the Java class Payroll.
+  <hdfs-input>    means %LAB%/input in this experiment.
+  <hdfs-output>   means %LAB%/output in this experiment.
+  <classpath>     is computed automatically by 'hadoop classpath'.
+  <local-file>    means a local Windows file such as employees.csv.
+
+Do NOT type angle-bracket placeholders into CMD. The concrete examples
+are the copy-paste commands.
+
+--------------------------------------------------------------------------------
+12. ONE-MINUTE EXAM REFERENCE
+--------------------------------------------------------------------------------
+set "LAB=/user/%USERNAME%/payroll"
+mkdir "%USERPROFILE%\payroll_lab" 2>nul
+cd /d "%USERPROFILE%\payroll_lab"
+> employees.csv echo 1,John Doe,Engineering,5000
+>> employees.csv echo 2,Jane Smith,HR,4000
+>> employees.csv echo 3,Tom Brown,Engineering,5500
+>> employees.csv echo 4,Alice White,HR,4200
+>> employees.csv echo 5,David Black,Sales,6000
+>> employees.csv echo 6,Emily Green,Sales,6500
+notepad PayrollMapper.java
+notepad PayrollReducer.java
+notepad Payroll.java
+hdfs dfs -mkdir -p %LAB%/input
+hdfs dfs -put -f employees.csv %LAB%/input/employees.csv
+mkdir classes 2>nul
+for /f "delims=" %A in ('hadoop classpath') do javac --release 8 -classpath "%A" -d classes PayrollMapper.java PayrollReducer.java Payroll.java
+jar -cvf payroll.jar -C classes .
+hdfs dfs -rm -r -f %LAB%/output
+hadoop jar payroll.jar Payroll %LAB%/input %LAB%/output
+hdfs dfs -cat %LAB%/output/part-r-00000
+
+Copy Java FILE CODE from Sections 04, 05, 06 into the Notepad files
+BEFORE continuing past those Notepad commands. This is a sequence,
+not a single self-running script.
+
+EXPECTED: Engineering 10500 | HR 8200 | Sales 12500
+SOURCE: Hadoop_MapReduce_Lab_Experiment_PPT 2.pptx, Slides 8-15.
